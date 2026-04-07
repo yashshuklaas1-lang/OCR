@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Yash Garg OCR Tool</title>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 20px auto; padding: 20px; }
+        h1 { color: #333; text-align: center; margin-bottom: 5px; }
+        .creator { text-align: center; color: #555; font-weight: bold; font-size: 18px; margin-top: 0; margin-bottom: 25px; letter-spacing: 1px; }
+        .controls { display: flex; flex-direction: column; gap: 15px; margin-bottom: 20px; padding: 15px; background: #f4f4f4; border-radius: 8px; border-left: 5px solid #ff5722; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        textarea { width: 100%; height: 400px; padding: 15px; font-size: 16px; font-family: 'Courier New', Courier, monospace; box-sizing: border-box; line-height: 1.5; border: 1px solid #ccc; border-radius: 5px; }
+        button { padding: 10px 15px; font-weight: bold; color: white; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; transition: 0.3s; }
+        button:hover:not(:disabled) { opacity: 0.8; transform: scale(1.02); }
+        button:disabled { background-color: #ccc !important; cursor: not-allowed; transform: none; }
+        
+        #start-btn { background-color: #ff5722; } 
+        #export-doc-btn { background-color: #007bff; padding: 8px 12px; font-size: 14px; margin-right: 5px; }
+        #export-txt-btn { background-color: #28a745; padding: 8px 12px; font-size: 14px; }
+        
+        #status { font-weight: bold; color: #d84315; }
+        .progress-container { width: 100%; background-color: #ddd; border-radius: 5px; display: none; margin-top: 10px; overflow: hidden; }
+        .progress-bar { width: 0%; height: 20px; background-color: #ff5722; border-radius: 5px; text-align: center; color: white; line-height: 20px; font-size: 12px; transition: width 0.3s; }
+        .output-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        .export-buttons { display: flex; }
+    </style>
+</head>
+<body>
+
+    <h1>Advanced PDF OCR Tool</h1>
+    <p class="creator">©️ YASH GARG</p>
+
+    <div class="controls">
+        <label for="pdf-upload"><b>1. Upload Scanned PDF File:</b></label>
+        <input type="file" id="pdf-upload" accept="application/pdf">
+        
+        <button id="start-btn">Start Advanced OCR Process</button>
+        
+        <p id="status">Status: Waiting for file...</p>
+        
+        <div class="progress-container" id="progress-container">
+            <div class="progress-bar" id="progress-bar">0%</div>
+        </div>
+    </div>
+
+    <div class="output-header">
+        <label for="output"><b>Extracted Text:</b></label>
+        <div class="export-buttons">
+            <button id="export-doc-btn" disabled>📥 Export .doc</button>
+            <button id="export-txt-btn" disabled>📄 Export .txt</button>
+        </div>
+    </div>
+    
+    <textarea id="output" placeholder="Scanned text yahan aayega..."></textarea>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+
+        const pdfUpload = document.getElementById('pdf-upload');
+        const startBtn = document.getElementById('start-btn');
+        const exportDocBtn = document.getElementById('export-doc-btn');
+        const exportTxtBtn = document.getElementById('export-txt-btn');
+        const statusText = document.getElementById('status');
+        const outputArea = document.getElementById('output');
+        const progressBar = document.getElementById('progress-bar');
+        const progressContainer = document.getElementById('progress-container');
+
+        // Image Enhancement for Accuracy
+        function enhanceCanvasForOCR(canvas) {
+            const enhancedCanvas = document.createElement('canvas');
+            enhancedCanvas.width = canvas.width;
+            enhancedCanvas.height = canvas.height;
+            const ctx = enhancedCanvas.getContext('2d');
+            ctx.filter = 'grayscale(100%) contrast(300%) brightness(120%)';
+            ctx.drawImage(canvas, 0, 0);
+            return enhancedCanvas;
+        }
+
+        startBtn.addEventListener('click', async () => {
+            if (pdfUpload.files.length === 0) {
+                alert("Please select a PDF file first!");
+                return;
+            }
+
+            const file = pdfUpload.files[0];
+            startBtn.disabled = true;
+            exportDocBtn.disabled = true;
+            exportTxtBtn.disabled = true;
+            outputArea.value = '';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
+            progressBar.innerText = '0%';
+
+            try {
+                statusText.innerText = "Status: Loading Engine (Optimized Mode)...";
+                const worker = await Tesseract.createWorker('hin');
+                
+                // PSM 6: Single Block Mode - Increases speed & reduces random line breaks
+                await worker.setParameters({ 
+                    tessedit_pageseg_mode: Tesseract.PSM.SINGLE_BLOCK 
+                });
+
+                statusText.innerText = "Status: Reading PDF...";
+                const fileReader = new FileReader();
+
+                fileReader.onload = async function() {
+                    const typedarray = new Uint8Array(this.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    const totalPages = pdf.numPages;
+
+                    statusText.innerText = `Status: Found ${totalPages} pages. Extracting...`;
+
+                    for (let i = 1; i <= totalPages; i++) {
+                        statusText.innerText = `Status: Processing Page ${i} of ${totalPages}...`;
+                        const page = await pdf.getPage(i);
+                        
+                        // Scale 2.0 provides the best balance of speed and high accuracy
+                        const viewport = page.getViewport({ scale: 2.0 }); 
+                        const rawCanvas = document.createElement('canvas');
+                        const rawCtx = rawCanvas.getContext('2d');
+                        rawCanvas.height = viewport.height;
+                        rawCanvas.width = viewport.width;
+
+                        await page.render({ canvasContext: rawCtx, viewport: viewport }).promise;
+                        const processedCanvas = enhanceCanvasForOCR(rawCanvas);
+
+                        const { data: { text } } = await worker.recognize(processedCanvas);
+                        
+                        // Smart Line Break Fix: Joins broken lines logically without removing real paragraphs
+                        let fixedText = text.replace(/([^\n])\n([^\n])/g, '$1 $2');
+                        
+                        // Page identifier is removed, text is appended smoothly
+                        outputArea.value += fixedText.trim() + '\n\n';
+
+                        let percent = Math.round((i / totalPages) * 100);
+                        progressBar.style.width = percent + '%';
+                        progressBar.innerText = percent + '%';
+                    }
+
+                    await worker.terminate();
+                    statusText.innerText = "Status: OCR Completed Successfully!";
+                    startBtn.disabled = false;
+                    exportDocBtn.disabled = false;
+                    exportTxtBtn.disabled = false;
+                };
+                fileReader.readAsArrayBuffer(file);
+            } catch (error) {
+                console.error(error);
+                statusText.innerText = "Status: Error occurred!";
+                startBtn.disabled = false;
+            }
+        });
+
+        // 1. Export DOC - Fixed format to prevent "corrupted file" errors in Word
+        exportDocBtn.addEventListener('click', () => {
+            const text = outputArea.value;
+            if (!text) return;
+            
+            // Format text properly using HTML paragraphs
+            const paragraphs = text.split('\n\n').map(p => `<p>${p}</p>`).join('');
+            
+            const sourceHTML = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+            <head><meta charset='utf-8'><title>Yash Garg OCR Document</title>
+            <style>p { font-family: 'Arial', sans-serif; font-size: 14pt; line-height: 1.5; }</style>
+            </head><body>${paragraphs}</body></html>`;
+            
+            const blob = new Blob(['\ufeff', sourceHTML], { type: 'application/msword;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const fileDownload = document.createElement("a");
+            fileDownload.href = url;
+            fileDownload.download = 'Yash_Garg_OCR_Text.doc';
+            document.body.appendChild(fileDownload);
+            fileDownload.click();
+            setTimeout(() => { document.body.removeChild(fileDownload); URL.revokeObjectURL(url); }, 500);
+        });
+
+        // 2. Export TXT
+        exportTxtBtn.addEventListener('click', () => {
+            const text = outputArea.value;
+            if (!text) return;
+            
+            const blob = new Blob(['\ufeff', text], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const fileDownload = document.createElement("a");
+            fileDownload.href = url;
+            fileDownload.download = 'Yash_Garg_OCR_Text.txt';
+            document.body.appendChild(fileDownload);
+            fileDownload.click();
+            setTimeout(() => { document.body.removeChild(fileDownload); URL.revokeObjectURL(url); }, 500);
+        });
+    </script>
+
+</body>
+</html>
